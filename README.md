@@ -106,6 +106,7 @@ tests/unit/               scripts, store, configuration and Jenkinsfile; no cont
 tests/stack/              the end-to-end run and the rebuild proof, against the running controller
 docs/adr/                 decision records
 docker-compose.yml        controller, agent, Git server, artifact store
+tech/                     one beginner-level note per technology this repository uses, from zero; start at tech/README.md
 ```
 
 Dependency rule: in `app/`, domain depends on nothing, application on domain, infrastructure and interfaces on both, and nothing on interfaces (an ArchUnit test). Elsewhere: tests depend on the scripts, the Jenkinsfile and `tests/support`; the Jenkinsfile depends on `pipeline/scripts`; the controller depends on nothing in `app/`.
