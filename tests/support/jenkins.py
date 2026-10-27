@@ -144,6 +144,35 @@ class Jenkins:
         if status not in (200, 302):
             raise JenkinsError(status, inputs[0]["proceedUrl"], body)
 
+    def burst(self, job: str, count: int, parameters: Mapping[str, str] | None = None) -> list[int]:
+        """Queue ``count`` builds at once and return their numbers.
+
+        A build gets its number when it leaves the queue, not when it enters it, so the numbers are the next ``count``
+        numbers the job will hand out.
+        """
+        first = self.next_build_number(job)
+        for _ in range(count):
+            status, body = self.post(f"/job/{job}/buildWithParameters", parameters or {"_": "1"})
+            if status not in (200, 201):
+                raise JenkinsError(status, f"/job/{job}/buildWithParameters", body)
+        return list(range(first, first + count))
+
+    def timing(self, job: str, number: int) -> tuple[int, int]:
+        """(queue time, run time) of a build in milliseconds, from the Pipeline stage view's API."""
+        description = self.get_json(f"/job/{job}/{number}/wfapi/describe")
+        return int(description["queueDurationMillis"]), int(description["durationMillis"])
+
+    def run_groovy(self, script: str) -> str:
+        """Run a Groovy snippet in the controller's script console (administrators only) and return its output."""
+        status, body = self.post("/scriptText", {"script": script})
+        if status != 200:
+            raise JenkinsError(status, "/scriptText", body)
+        return body
+
+    def stop(self, job: str, number: int) -> None:
+        """Ask a running build to stop."""
+        self.post(f"/job/{job}/{number}/stop")
+
     def now_ms(self) -> int:
         """Wall-clock milliseconds, for comparing with stage timestamps."""
         return int(time.time() * 1000)
