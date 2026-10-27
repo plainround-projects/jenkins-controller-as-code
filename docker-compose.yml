@@ -1,0 +1,77 @@
+# The controller, its agent, the Git server it builds from and the artifact store it publishes to. Credentials come
+# from .env (created by `make up`), never from this file.
+---
+name: jenkins-controller-as-code
+
+services:
+  git-server:
+    build:
+      context: services/git-server
+      args:
+        BASE_IMAGE: alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+    environment:
+      REPOS: controller-as-code
+    ports:
+      - "127.0.0.1:${GIT_PORT:-18480}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:uid=10001,gid=10001
+    volumes:
+      - git_repos:/srv/git
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  publish-sink:
+    build:
+      context: services/publish-sink
+      args:
+        BASE_IMAGE: python:3.13-slim-bookworm@sha256:fa16c23a012723c24eef39cc755a27babbba16b711e5d1e6cf16225ad21637cd
+    environment:
+      EXPECTED_TOKEN: ${PUBLISH_TOKEN:?run make up, which creates .env}
+    ports:
+      - "127.0.0.1:${SINK_PORT:-18482}:8080"
+    read_only: true
+    tmpfs:
+      - /data:uid=10001,gid=10001
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  controller:
+    build:
+      context: controller
+    image: my-controller:1
+    environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?run make up, which creates .env}
+      PUBLISH_TOKEN: ${PUBLISH_TOKEN:?run make up, which creates .env}
+    ports:
+      - "127.0.0.1:${CONTROLLER_PORT:-18481}:8080"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+    depends_on:
+      git-server:
+        condition: service_started
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  agent:
+    build:
+      context: agent
+    image: my-agent:1
+    environment:
+      JENKINS_URL: http://controller:8080
+      JENKINS_AGENT_NAME: docker-agent
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?run make up, which creates .env}
+    volumes:
+      - agent_work:/home/jenkins/agent
+      - maven_cache:/home/jenkins/.m2
+    depends_on:
+      controller:
+        condition: service_healthy
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  jenkins_home:
+  agent_work:
+  maven_cache:
+  git_repos:
