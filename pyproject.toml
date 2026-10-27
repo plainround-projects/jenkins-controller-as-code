@@ -1,0 +1,46 @@
+[project]
+name = "jenkins-controller-as-code-tests"
+version = "0.1.0"
+description = "Tests for the controller-as-code project: pipeline scripts, configuration, the artifact store and the running stack"
+requires-python = ">=3.12"
+dependencies = ["pyyaml==6.0.3"]
+
+[project.optional-dependencies]
+dev = ["pytest==9.0.2", "pytest-cov==7.0.0", "ruff==0.14.10", "mypy==1.19.1", "yamllint==1.38.0", "types-PyYAML==6.0.12.20250915"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "services/publish-sink"]
+addopts = "-ra --strict-markers"
+markers = [
+  "stack: needs the controller, agent and services from `make up` and drives Jenkins through its API",
+  "rebuild: destroys and recreates the controller (slow); run by `make rebuild-proof`",
+]
+
+[tool.coverage.run]
+source = ["tests/support", "services/publish-sink/publish_sink"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 90
+
+[tool.ruff]
+line-length = 140
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "D", "ANN", "S", "PT", "RUF"]
+ignore = ["D203", "D213", "D401", "PT018"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S603", "S607", "D", "ANN401", "S105", "S106"]
+"tests/support/**" = ["S101", "S603", "S607", "ANN401"]
+"services/publish-sink/publish_sink/server.py" = ["S104"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["tests", "services/publish-sink"]
+explicit_package_bases = true
+mypy_path = "services/publish-sink:."
