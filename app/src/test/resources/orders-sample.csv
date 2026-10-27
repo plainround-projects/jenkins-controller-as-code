@@ -1,0 +1,7 @@
+id,customer,amount,status
+o-1001,ada,120.00,paid
+o-1002,grace,35.50,shipped
+o-1003,ada,18.25,shipped
+o-1004,linus,60.00,placed
+o-1005,grace,12.00,cancelled
+o-1006,linus,44.40,paid
