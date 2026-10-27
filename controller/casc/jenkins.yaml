@@ -1,0 +1,71 @@
+---
+# Everything about this controller that is configuration. Values in ${...} come from the container's environment
+# (docker-compose.yml passes them from .env); a missing variable stops Jenkins from starting.
+jenkins:
+  systemMessage: "Controller as code: change controller/casc/jenkins.yaml in Git, not this page."
+  # No builds on the controller: every build runs on an agent.
+  numExecutors: 0
+  mode: EXCLUSIVE
+  quietPeriod: 0
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "admin"
+          password: "${ADMIN_PASSWORD}"
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+  nodes:
+    # The container agent (agent/Dockerfile). It connects to the controller over a WebSocket; its secret is read by
+    # the agent's entrypoint from the controller's API, so no agent secret is stored anywhere.
+    - permanent:
+        name: "docker-agent"
+        labelString: "docker-agent"
+        numExecutors: 2
+        remoteFS: "/home/jenkins/agent"
+        mode: EXCLUSIVE
+        retentionStrategy: "always"
+        launcher:
+          inbound:
+            webSocket: true
+            workDirSettings:
+              disabled: false
+              failIfWorkDirIsMissing: false
+              internalDir: "remoting"
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          # The id and type live in Git; only the secret value comes from the environment.
+          - string:
+              id: "publish-token"
+              scope: GLOBAL
+              description: "Token the publish step presents to the artifact store"
+              secret: "${PUBLISH_TOKEN}"
+unclassified:
+  location:
+    url: "http://localhost:18481/"
+    adminAddress: "admin@example.invalid"
+jobs:
+  - script: >
+      pipelineJob('order-summary') {
+        description('Builds, tests and publishes the order-summary project from the Jenkinsfile in Git')
+        parameters {
+          booleanParam('REQUIRE_APPROVAL', false, 'Hold the publish step until a person approves it')
+          booleanParam('ECHO_TOKEN', false, 'Make the publish step echo its token, to show that the log masks it')
+          booleanParam('BREAK_A_TEST', false, 'Make one unit test fail, to show how a failing test is reported')
+        }
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote { url('http://git-server:8080/controller-as-code.git') }
+                branches('*/main')
+              }
+            }
+            scriptPath('Jenkinsfile')
+            lightweight(true)
+          }
+        }
+      }
