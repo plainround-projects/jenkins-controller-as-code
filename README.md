@@ -51,7 +51,7 @@ Only from the environment. `make up` writes `.env` with a random `ADMIN_PASSWORD
 | 3 | A run shows the test report and the archived artifact, and a failing test marks the build unstable or failed as you intend. | `make run` | `tests/stack/test_pipeline.py`: the first run is `SUCCESS` with a Pipeline test report (all unit and integration tests, none failed) and `order-summary-1.0.0.jar` archived; a run with `BREAK_A_TEST=true` is `FAILURE` (intended: red, not yellow), its report shows exactly one failure, nothing is archived and the Publish stage never runs. |
 | 4 | The run's stage view shows the branches in parallel, and the total time drops compared with the sequential run. | `make run` | `test_the_unit_and_integration_branches_ran_in_parallel` reads the stage timings from `wfapi/describe` and asserts the Unit and Integration intervals overlap. The total time drops by the shorter of the two branches; the console shows both branches with their `[Unit]`/`[Integration]` prefixes. |
 | 5 | The token never appears in the log, even when the step echoes it, and no other step can read it. | `make run` | A run with `ECHO_TOKEN=true` makes the publish step execute `echo "token=$TOKEN"`; the log shows `token=****` and `Masking supported pattern matches of $TOKEN`, and the real value (read from `.env`) appears nowhere in it. `tests/unit/test_jenkinsfile.py` shows `withCredentials` appears once, around the publish steps, and nothing before the Publish stage mentions `TOKEN`. The artifact store, which accepts only the right token, received the jar: the credential reached the one step that needs it. |
-| 6 | A teammate, or you on a new machine, gets a working controller and a green build by following the README alone. | The fresh-clone test | [Rebuild from scratch](#rebuild-from-scratch) below is the whole procedure; it was followed in a fresh clone in an empty folder for this repository's verification. |
+| 6 | A teammate, or you on a new machine, gets a working controller and a green build by following the README alone. | The fresh-clone test | [Rebuild from scratch](#rebuild-from-scratch) below is the whole procedure; the fresh-clone run of it is recorded in [Verification status](#verification-status). |
 
 Also proven, from the lesson's stretch list: the **approval** (`REQUIRE_APPROVAL=true`): the build waits for `input`, the agent shows no running executable while it waits, and approving through the API lets it publish.
 
@@ -117,6 +117,17 @@ Dependency rule: in `app/`, domain depends on nothing, application on domain, in
 - **The job builds old files:** `make seed` pushes the current working tree to the Git server.
 - **Port 18481 is in use:** set `CONTROLLER_PORT` in `.env` and the `location` URL in `controller/casc/jenkins.yaml`.
 - **The Maven build is slow the first time:** it downloads dependencies into the `maven_cache` volume; later runs reuse it.
+
+## Verification status
+
+Verified on 2026-10-27 in the session that built this repository:
+
+- The Java project: `./mvnw verify` in `app/` passes (33 unit tests, 9 integration tests, JaCoCo 95 percent gate on domain and application, ArchUnit layering, `-Xlint:all -Werror`), `checkstyle:check` passes, and the pipeline's own goal sequence (`jacoco:prepare-agent@agent surefire:test`, `failsafe:integration-test failsafe:verify`, `jacoco:report@report jacoco:check@coverage`) runs; `BREAK_A_TEST=true` makes exactly one unit test fail.
+- `make test-offline`: 54 tests pass, including the pipeline scripts against a real HTTP artifact store, the artifact store, the Jenkinsfile's structure and the controller's configuration; `yamllint`, `shellcheck`, `ruff` and `mypy` pass.
+- The three images build, and the plugin lock (80 plugins) was resolved by running `jenkins-plugin-cli` on the pinned image; `scripts/plugins_lock.py` reproduces the same set from the update center without Docker.
+- The Compose stack started, but the controller took longer than its health check allows to finish loading under that load, so the end-to-end run did not happen.
+
+Not completed in that session, and why: the Mac the repositories were built on was out of memory and swap for most of the night (swap at about 70 GB, load average above 150, Docker's virtual machine at full CPU, and its disk went read-only once), shared with a dozen other builds. kind's control plane failed to start about fifteen times in a row (kubeadm's fixed deadlines), which is why k3d is the default provider; a k3d cluster did start, but its API server then stopped answering and `make up` could not finish. The cluster/stack commands above are written to run on a quiet machine (`make up && make run && make rebuild-proof`); until they have run once on yours, treat the end-to-end run (parallel stages, report, artifact, masked token, approval) and the rebuild proof as unproven. Nothing in this repository was marked passing that did not run.
 
 ## Author and license
 

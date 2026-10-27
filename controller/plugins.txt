@@ -1,6 +1,6 @@
-# The plugins this controller is built for, each at an exact version. jenkins-plugin-cli would resolve their
-# dependencies to whatever is newest on the day, so `make plugins-lock` installs this list once and writes the full
-# result, dependencies included, to plugins.lock.txt, which is what the Dockerfile installs.
+# The plugins this controller is built for, each at an exact version. `make plugins-lock` (scripts/plugins_lock.py) adds every
+# plugin they need, dependencies included, at one exact version each, and writes the whole list to plugins.lock.txt, which
+# is what the Dockerfile installs.
 configuration-as-code:2136.veb_3a_554550b_f
 workflow-aggregator:608.v67378e9d3db_1
 git:5.11.0

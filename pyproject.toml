@@ -41,6 +41,6 @@ ignore = ["D203", "D213", "D401", "PT018"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["tests", "services/publish-sink"]
+files = ["tests", "services/publish-sink", "scripts"]
 explicit_package_bases = true
-mypy_path = "services/publish-sink:."
+mypy_path = "services/publish-sink:scripts:."

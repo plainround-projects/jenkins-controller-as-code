@@ -62,7 +62,7 @@ audit: $(STAMP) ## known-vulnerability check of the locked Python dependencies
 	$(VENV)/bin/pip-audit --require-hashes -r requirements-dev.lock
 
 plugins-lock: ## resolve controller/plugins.txt into controller/plugins.lock.txt
-	./scripts/plugins-lock.sh
+	python3 scripts/plugins_lock.py
 
 logs: ## follow the controller's log
 	docker compose logs --follow controller
