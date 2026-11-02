@@ -39,6 +39,40 @@ rules:
 ```
 (The file writes each rule over several lines.) `ignore:` is a block of paths. `line-length` 140 allows long commands in the workflow. `document-start` requires `---`. `truthy` allows only `true` and `false`, so YAML 1.1 words like `yes`/`on` are errors, and `check-keys: false` lets GitHub Actions' key `on:` pass. `comments` wants two spaces before `# text` that follows a value. `braces` and `brackets` allow one space inside `{ }` and `[ ]` (`target: { kind: Deployment }`) or none (`{}`).
 
+<!-- full-walkthrough:begin -->
+### 5.A Full walkthrough: `.yamllint.yaml`
+
+yamllint is a program that checks YAML files for syntax errors and style problems. Its own configuration is a YAML file.
+
+```yaml
+---
+extends: default
+ignore: |
+  .venv/
+  .work/
+  app/target/
+rules:
+  line-length:
+    max: 140
+  document-start:
+    present: true
+  truthy:
+    allowed-values: ["true", "false"]
+    check-keys: false
+  comments:
+    min-spaces-from-content: 2
+  braces:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+  brackets:
+    min-spaces-inside: 0
+    max-spaces-inside: 1
+```
+- `extends: default` starts from yamllint's built-in rule set.
+- `ignore:` with `|` (a multi-line text block) lists patterns of files to skip, one per line: the Python virtual environment, a scratch folder and Maven's build output.
+- `rules:` changes individual rules. `line-length: max: 140` allows long lines (the default is 80). `document-start: present: true` requires the `---` marker at the top of every file. `truthy` controls words YAML turns into booleans (`yes`, `on`, ...): only `true` and `false` are allowed as values, and key names are not checked (`check-keys: false`), which matters for the GitHub Actions key `on:`. `comments: min-spaces-from-content: 2` demands two spaces before a trailing `#` comment. `braces` and `brackets` limit spaces inside `{ }` and `[ ]` to zero or one, so `[ALL]` and `[ ALL ]` are fine but `[  ALL  ]` is not.
+<!-- full-walkthrough:end -->
+
 ## 6. Try it yourself
 
 1. `.venv/bin/yamllint -s .` : no output.

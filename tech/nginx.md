@@ -34,6 +34,65 @@ In short:
 
 In this stack the repository is created empty and filled by `scripts/seed-project.sh` (a force-push). There is no authentication: the port is published on `127.0.0.1` only.
 
+
+
+
+
+<!-- full-walkthrough:begin -->
+### 5.A Full walkthrough: every line of `services/git-server/nginx.conf`
+
+nginx is a web server. Its configuration is a tree of *directives* (`name value;`) and *blocks* (`name { ... }`). `git-http-backend` is a program shipped with Git that speaks the "smart HTTP" protocol (what `git clone http://...` and `git push http://...` use); nginx cannot run it directly, so it hands requests to `fcgiwrap`, which runs it as a CGI program.
+
+```nginx
+worker_processes 1;
+pid /tmp/nginx.pid;
+error_log /dev/stderr info;
+
+events { worker_connections 64; }
+
+http {
+  access_log /dev/stdout;
+  client_body_temp_path /tmp/nginx-body;
+  proxy_temp_path /tmp/nginx-proxy;
+  fastcgi_temp_path /tmp/nginx-fastcgi;
+  uwsgi_temp_path /tmp/nginx-uwsgi;
+  scgi_temp_path /tmp/nginx-scgi;
+```
+- `worker_processes 1;` runs one worker, enough for a demo.
+- `pid /tmp/nginx.pid;` writes the process id to `/tmp` because the container's root filesystem is read-only.
+- `error_log /dev/stderr info;` sends errors to standard error so `docker compose logs` shows them.
+- `events { worker_connections 64; }` limits simultaneous connections per worker.
+- `http {` starts the web-server settings. `access_log /dev/stdout;` writes each request to standard output.
+- Lines 9-13 move nginx's temporary directories (request bodies, proxying, FastCGI, uwsgi, scgi) into `/tmp`, the only writable place; without this nginx would try to write under `/var/lib` and fail.
+
+```nginx
+  server {
+    listen 8080;
+    client_max_body_size 50m;
+
+    location = /healthz {
+      default_type text/plain;
+      return 200 "ok\n";
+    }
+```
+`server {` defines one virtual server. `listen 8080;` is the port inside the container. `client_max_body_size 50m;` raises the maximum request size so a push of a larger repository is not rejected. `location = /healthz` matches exactly that path and answers directly: `default_type text/plain;` sets the content type and `return 200 "ok\n";` sends the status and body, which the Docker health check relies on.
+
+```nginx
+    location ~ ^/.+\.git/(HEAD|info/refs|objects/info/.*|git-(upload|receive)-pack)$ {
+      include /etc/nginx/fastcgi_params;
+      fastcgi_pass unix:/tmp/fcgiwrap.sock;
+      fastcgi_param SCRIPT_FILENAME /usr/libexec/git-core/git-http-backend;
+      fastcgi_param GIT_PROJECT_ROOT /srv/git;
+      fastcgi_param GIT_HTTP_EXPORT_ALL "";
+      fastcgi_param PATH_INFO $uri;
+      fastcgi_param REMOTE_USER local;
+    }
+  }
+}
+```
+The second `location` uses `~`, which means "the path matches this regular expression". The pattern `^/.+\.git/(HEAD|info/refs|objects/info/.*|git-(upload|receive)-pack)$` accepts a repository path ending in `.git/` followed by one of the files a Git client asks for: `HEAD`, the reference list `info/refs`, `objects/info/...`, or the two service endpoints `git-upload-pack` (used by fetch and clone) and `git-receive-pack` (used by push). Anything else gets no match. Inside: `include /etc/nginx/fastcgi_params;` loads the standard CGI variables; `fastcgi_pass unix:/tmp/fcgiwrap.sock;` forwards the request to the `fcgiwrap` socket; `SCRIPT_FILENAME` names the program to run; `GIT_PROJECT_ROOT /srv/git` is where the bare repositories live; `GIT_HTTP_EXPORT_ALL ""` allows serving every repository without a marker file; `PATH_INFO $uri` passes the request path; `REMOTE_USER local` marks the request as coming from a user named `local` (git refuses pushes with no user name). The last two lines close the `server` and `http` blocks.
+<!-- full-walkthrough:end -->
+
 ## 6. Try it yourself
 
 1. `curl -s 'http://127.0.0.1:18480/controller-as-code.git/info/refs?service=git-upload-pack' | head -c 150` : Git's ref advertisement.

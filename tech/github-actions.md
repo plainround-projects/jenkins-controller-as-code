@@ -51,6 +51,73 @@ jobs:
 ```
 `actions/setup-java@v4` installs a JDK (here Temurin 21) so Maven can compile. The `lint` job runs `make lint`, which includes `checkstyle:check` on the Java. The `offline` job runs the Python tests, then the whole Maven lifecycle (`verify`: compile, unit tests, package, integration tests, coverage rule), then the dependency audit. The `stack` job uses the Docker that GitHub's runners already have: `make up` builds and starts the stack, `make run` runs the end-to-end test. `if: failure()` makes the last step run **only** when an earlier step failed, printing the last 200 lines of every container's log (`--no-color` keeps the log readable). None of this has run on GitHub: the repository has not been pushed.
 
+<!-- full-walkthrough:begin -->
+### 5.A Full walkthrough: `.github/workflows/ci.yml`
+
+GitHub Actions runs automation on GitHub's servers when something happens in the repository. A **workflow** is a YAML file in `.github/workflows/`. It contains **jobs**; each job runs on a fresh virtual machine (the **runner**) and consists of **steps**, either `uses:` (run a ready-made action) or `run:` (run a shell command). Jobs without `needs:` run in parallel.
+
+```yaml
+---
+name: ci
+
+on: [push, pull_request]
+```
+`name` is the label shown on GitHub. `on: [push, pull_request]` starts the workflow whenever someone pushes a commit or opens or updates a pull request.
+
+```yaml
+jobs:
+  lint:
+    name: yamllint, shellcheck, ruff, mypy, compose config, checkstyle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: make lint
+```
+`jobs:` begins the list. The job `lint` has a `name` and runs on `ubuntu-latest`. Its steps: `actions/checkout@v4` downloads the repository into the runner; `actions/setup-python@v5` installs Python 3.12 (the `with:` block passes the action's inputs); `actions/setup-java@v4` installs Java 21 from the Temurin distribution (needed by `make lint-app`); `run: make lint` runs the whole lint target.
+
+```yaml
+  offline:
+    name: Unit tests with coverage, the Java project's tests, dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - run: make test-offline
+      - run: cd app && ./mvnw --batch-mode --no-transfer-progress verify
+      - run: make audit
+```
+The `offline` job repeats the set-up and then runs three steps: the offline Python tests with coverage, the Java project's tests (`verify` runs unit tests, integration tests and the coverage check), and the dependency audit.
+
+```yaml
+  stack:
+    name: Controller, agent and services in Docker Compose, and the end-to-end run
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: make up
+      - run: make run
+      - if: failure()
+        run: docker compose logs --no-color --tail=200
+```
+The `stack` job sets up Python and runs `make up` (builds and starts the whole Docker Compose stack on the runner) and `make run` (the end-to-end tests). The last step has `if: failure()`, so it runs only when an earlier step failed, and prints the last 200 lines of every container's log, which is what you need to find out why.
+<!-- full-walkthrough:end -->
+
 ## 6. Try it yourself
 
 1. `grep -n 'run:' .github/workflows/ci.yml` : the commands CI runs.

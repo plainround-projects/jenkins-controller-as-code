@@ -87,6 +87,117 @@ A Job DSL (Groovy) script creates a pipeline job named `order-summary` with thre
 
 The agent is defined here as well (see the Jenkins note). The whole file has **no secret value**: the offline test asserts that passwords and tokens appear only as `${...}` references.
 
+
+
+
+
+
+<!-- full-walkthrough:begin -->
+### 5.A Full walkthrough: every line of `controller/casc/jenkins.yaml`
+
+JCasC ("Jenkins Configuration as Code") is a Jenkins plugin that reads a YAML file at startup and applies it as if someone had clicked through all the settings pages. The file is plain YAML (see `yaml.md`). Text like `${ADMIN_PASSWORD}` is replaced by the value of that environment variable; if the variable is missing, Jenkins refuses to start rather than run with a blank password.
+
+```yaml
+---
+# Everything about this controller that is configuration. Values in ${...} come from the container's environment
+# (docker-compose.yml passes them from .env); a missing variable stops Jenkins from starting.
+jenkins:
+  systemMessage: "Controller as code: change controller/casc/jenkins.yaml in Git, not this page."
+  # No builds on the controller: every build runs on an agent.
+  numExecutors: 0
+  mode: EXCLUSIVE
+  quietPeriod: 0
+```
+- `---` starts the YAML document; lines 2-3 are comments.
+- `jenkins:` is the top-level section for core Jenkins settings.
+- `systemMessage` is the banner shown on the home page.
+- `numExecutors: 0` means the controller itself runs no builds. An executor is one slot for running a build. With zero on the controller, all builds go to an agent; builds on the controller would be a security risk because the build code could read the controller's files.
+- `mode: EXCLUSIVE` means "only run jobs that explicitly ask for this node's label".
+- `quietPeriod: 0` starts a triggered build immediately instead of waiting a few seconds.
+
+```yaml
+  securityRealm:
+    local:
+      allowsSignup: false
+      users:
+        - id: "admin"
+          password: "${ADMIN_PASSWORD}"
+  authorizationStrategy:
+    loggedInUsersCanDoAnything:
+      allowAnonymousRead: false
+```
+`securityRealm` decides *who users are*. `local` uses Jenkins' own user database. `allowsSignup: false` removes the "create an account" link. `users` lists the one user, `admin`, whose password is the environment variable. `authorizationStrategy` decides *what users may do*: `loggedInUsersCanDoAnything` lets any logged-in user do everything, and `allowAnonymousRead: false` shows nothing to people who are not logged in.
+
+```yaml
+  nodes:
+    # The container agent (agent/Dockerfile). It connects to the controller over a WebSocket; its secret is read by
+    # the agent's entrypoint from the controller's API, so no agent secret is stored anywhere.
+    - permanent:
+        name: "docker-agent"
+        labelString: "docker-agent"
+        numExecutors: 2
+        remoteFS: "/home/jenkins/agent"
+        mode: EXCLUSIVE
+        retentionStrategy: "always"
+        launcher:
+          inbound:
+            webSocket: true
+            workDirSettings:
+              disabled: false
+              failIfWorkDirIsMissing: false
+              internalDir: "remoting"
+```
+`nodes` declares machines that run builds. `- permanent:` is one item of the list: a node that always exists. Its `name` and `labelString` are both `docker-agent`; the Jenkinsfile asks for that label. `numExecutors: 2` lets two builds run on it at once (the parallel Unit and Integration stages need two). `remoteFS` is the folder on the agent where workspaces live. `retentionStrategy: "always"` keeps the node online. The `launcher` says how the agent connects: `inbound` means the agent starts the connection to the controller (not the other way), `webSocket: true` makes it use an ordinary HTTP WebSocket instead of a separate TCP port. `workDirSettings` configures the agent's "remoting" working directory: it is enabled (`disabled: false`), a missing folder is not an error, and `internalDir: "remoting"` is the folder name used for internal files.
+
+```yaml
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          # The id and type live in Git; only the secret value comes from the environment.
+          - string:
+              id: "publish-token"
+              scope: GLOBAL
+              description: "Token the publish step presents to the artifact store"
+              secret: "${PUBLISH_TOKEN}"
+```
+`credentials` creates entries in Jenkins' secret store. `system` is the global store, `domainCredentials` groups credentials by domain, and `- credentials:` begins that group's list. The entry is of type `string` (a secret text): its `id` (what the Jenkinsfile asks for), `scope: GLOBAL` (usable by any job), a `description`, and the `secret`, read from the `PUBLISH_TOKEN` environment variable. The id and type are in Git; the value never is.
+
+```yaml
+unclassified:
+  location:
+    url: "http://localhost:18481/"
+    adminAddress: "admin@example.invalid"
+```
+`unclassified` is where JCasC puts plugin settings that do not fit anywhere else. `location.url` is the address Jenkins uses in links; `adminAddress` is the reply-to address for any mail Jenkins sends (`.invalid` is a reserved domain that can never exist).
+
+```yaml
+jobs:
+  - script: >
+      pipelineJob('order-summary') {
+        description('Builds, tests and publishes the order-summary project from the Jenkinsfile in Git')
+        parameters {
+          booleanParam('REQUIRE_APPROVAL', false, 'Hold the publish step until a person approves it')
+          booleanParam('ECHO_TOKEN', false, 'Make the publish step echo its token, to show that the log masks it')
+          booleanParam('BREAK_A_TEST', false, 'Make one unit test fail, to show how a failing test is reported')
+        }
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote { url('http://git-server:8080/controller-as-code.git') }
+                branches('*/main')
+              }
+            }
+            scriptPath('Jenkinsfile')
+            lightweight(true)
+          }
+        }
+      }
+```
+`jobs:` is handled by the Job DSL plugin: each item with `script:` is a Groovy program that creates jobs. The `>` after `script:` begins a YAML "folded" text block, a multi-line string written with indentation. The program calls `pipelineJob('order-summary')` which defines a pipeline job. `parameters { booleanParam(...) }` mirrors the three parameters in the Jenkinsfile so the job form shows them from the first run. `definition { cpsScm { ... } }` says the pipeline script comes from source control ("CPS" is the Jenkins engine that runs pipeline Groovy, and `cpsScm` means "load the script from SCM"). `scm { git { ... } }` names the repository: `remote { url(...) }` is the Git server container's address (reached by service name), and `branches('*/main')` selects the main branch. `scriptPath('Jenkinsfile')` is the file to load. `lightweight(true)` fetches just that one file instead of cloning the whole repository for the definition.
+<!-- full-walkthrough:end -->
+
 ## 6. Try it yourself
 
 1. `grep -n '\${' controller/casc/jenkins.yaml` : the only dynamic values: `ADMIN_PASSWORD` and `PUBLISH_TOKEN`.

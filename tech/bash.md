@@ -140,6 +140,309 @@ exec /usr/local/bin/jenkins-agent
 ```
 `: "${VAR:=default}"` assigns a default. The loop (not shown) waits until the controller offers a secret. `sed -n 's:...:...:p'` uses `:` as the delimiter (the pattern contains `/`) and prints only the matching 64-hex-character secret. `unset ADMIN_PASSWORD` removes the admin password from the environment before the agent starts. `exec` replaces the shell with the agent program.
 
+
+
+
+
+<!-- full-walkthrough:begin -->
+### 5.A Full walkthrough: every shell script, line by line
+
+**What a shell script is.** A *shell* is the program that reads the commands you type in a terminal. A *script* is a text file containing those commands, so the computer can run them in order without you typing. These scripts are written for **Bash**, the most common shell on Linux and macOS (the two small container scripts use plain `sh`, a simpler shell that every Linux image has). The first line of each script, `#!/usr/bin/env bash`, is called a *shebang*: it tells the operating system which program should interpret the file. Lines starting with `#` are comments for human readers.
+
+**Ideas used in almost every script below**, explained once here:
+
+- `set -euo pipefail` switches on three safety rules. `-e` stops the script at the first command that fails (without it, the script would carry on after an error). `-u` makes using a variable that was never set an error (so a typo in a variable name is caught). `-o pipefail` makes a chain of commands joined by `|` fail if *any* part of it fails, not only the last.
+- `"${VAR}"` reads the value of a variable. The double quotes keep a value with spaces together as one word. `${VAR:-default}` means "the value, or `default` if unset or empty". `${VAR:?message}` means "the value, or stop with this message if unset or empty".
+- `$(command)` runs the command and substitutes its printed output. `$((1 + 2))` does integer arithmetic.
+- `source file` runs another script's lines *inside the current script*, so the variables and functions it defines become available here.
+- A function is a named group of commands: `name() { ... }`. `"$@"` means "all the arguments given", each kept as one separate word; `"$*"` joins them into one string.
+- Exit codes: every program ends with a number; `0` means success, anything else failure. `&&` runs the next command only on success, `||` only on failure.
+
+#### `scripts/lib.sh`: helpers shared by every script
+
+```bash
+#!/usr/bin/env bash
+# Shared helpers for the scripts. Source it; do not run it.
+# shellcheck shell=bash
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export ROOT
+```
+Line 3 is not an ordinary comment: `# shellcheck shell=bash` is an instruction to ShellCheck (the script checker) saying "treat this file as Bash even though it has no `set` line". Line 5 finds the repository root. `${BASH_SOURCE[0]}` is the path of the file being read right now (it keeps working when the file is `source`d, where `$0` would name the caller). `dirname` removes the file name, leaving the folder. `/..` goes one level up. `cd ... && pwd` changes into that folder and prints the absolute path; because it runs inside `$(...)`, the `cd` does not affect the caller. `export ROOT` makes the variable visible to programs the script starts.
+
+```bash
+if [ -f "${ROOT}/.env" ]; then
+  set -a
+  # shellcheck source=/dev/null
+  source "${ROOT}/.env"
+  set +a
+fi
+CONTROLLER_PORT="${CONTROLLER_PORT:-18481}"
+GIT_PORT="${GIT_PORT:-18480}"
+SINK_PORT="${SINK_PORT:-18482}"
+CONTROLLER_URL="http://127.0.0.1:${CONTROLLER_PORT}"
+export CONTROLLER_PORT GIT_PORT SINK_PORT CONTROLLER_URL
+```
+If a `.env` file exists, lines 9-12 load it. `set -a` means "every variable assigned from now on is automatically exported", so `source` of a file of plain `NAME=value` lines exports all of them; `set +a` turns the mode off. The `# shellcheck source=/dev/null` comment tells ShellCheck not to try to read the `.env` file. Lines 14-16 give default port numbers if `.env` did not set them. Line 17 builds the controller's URL for `curl`; line 18 exports the four values.
+
+```bash
+log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*" >&2; }
+die() { log "error: $*"; exit 1; }
+```
+`log` prints a message prefixed with the time. `printf` is a stricter `echo`: `%s` placeholders are replaced by the following arguments, `\n` is a newline, `date +%H:%M:%S` prints hours, minutes, seconds. `>&2` sends the text to *standard error* so it does not mix with output another script may capture. `die` logs an error and exits with code 1.
+
+```bash
+require() {
+  local tool
+  for tool in "$@"; do
+    command -v "${tool}" >/dev/null 2>&1 || die "${tool} is not installed (see the prerequisites in README.md)"
+  done
+}
+```
+`require` checks that each named program is installed. `local tool` makes the variable local to the function. `for tool in "$@"` loops over every argument. `command -v NAME` prints the program's path if it exists and fails if not; `>/dev/null 2>&1` throws away both normal output and error output (`/dev/null` is a file that discards everything written to it); `|| die ...` runs only when the check failed.
+
+```bash
+# wait_for <description> <timeout-seconds> <command...>: poll once a second until the command succeeds.
+wait_for() {
+  local description="$1" timeout="$2" waited=0
+  shift 2
+  until "$@" >/dev/null 2>&1; do
+    if [ "${waited}" -ge "${timeout}" ]; then
+      die "timed out after ${timeout}s waiting for ${description}"
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  log "${description}: ok (${waited}s)"
+}
+```
+`wait_for DESCRIPTION TIMEOUT COMMAND...` retries a command until it succeeds. Line 32 reads the first two arguments into local variables and starts a counter `waited` at 0; `shift 2` discards those two arguments so `"$@"` now contains only the command. `until "$@" ...; do ... done` runs the loop body as long as the command *fails*. Inside, `[ "${waited}" -ge "${timeout}" ]` tests "counter is greater than or equal to the timeout" (`[ ... ]` is the test command); if so it dies with a message. Otherwise it sleeps one second and increments the counter. When the command finally succeeds, line 41 logs how long it took. The command is re-run on every pass, never run once and reused.
+
+#### `scripts/init-env.sh`: create the secrets file
+
+```bash
+#!/usr/bin/env bash
+# Creates .env from .env.example with random secrets, unless .env exists. The secrets stay on this machine: .env is not
+# tracked, and the controller reads them from its environment.
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+require openssl
+```
+The script loads `lib.sh` (line 5) and requires `openssl`, the cryptography toolkit used to make random values.
+
+```bash
+if [ -f "${ROOT}/.env" ]; then
+  log ".env already exists"
+  exit 0
+fi
+```
+`[ -f FILE ]` is true when the file exists. If `.env` is already there the script logs that and `exit 0` (success) without touching it, so a second `make up` does not change your passwords.
+
+```bash
+umask 077
+sed -e "s/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=$(openssl rand -hex 16)/" \
+    -e "s/^PUBLISH_TOKEN=.*/PUBLISH_TOKEN=$(openssl rand -hex 24)/" "${ROOT}/.env.example" > "${ROOT}/.env"
+log "created .env with random secrets"
+```
+`umask 077` makes every file created from here on readable only by you (the mask removes permissions for group and others). `sed -e 's/OLD/NEW/'` edits text as it flows through: each `-e` is one substitution. `^ADMIN_PASSWORD=.*` matches a line that starts with `ADMIN_PASSWORD=` and has anything after it, and the replacement puts in `openssl rand -hex 16`, 16 random bytes written as 32 hexadecimal characters (24 bytes for the token). The template file is the input and `> .env` writes the result as a new file; the backslash at the end of line 13 continues the command on the next line. The template holds placeholders only; the real secrets exist only on your computer.
+
+#### `scripts/up.sh`: everything `make up` does
+
+```bash
+#!/usr/bin/env bash
+# Everything `make up` does: secrets, images, containers, and the repository the job builds.
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+require docker curl git
+
+"${ROOT}/scripts/init-env.sh"
+# .env exists now; read it (lib.sh loaded before the file existed).
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+cd "${ROOT}"
+docker compose up --detach --build --wait --wait-timeout 600
+"${ROOT}/scripts/seed-project.sh"
+wait_for "the agent to be online" 180 bash -c "curl -fsS -u admin:\"\${ADMIN_PASSWORD}\" ${CONTROLLER_URL}/computer/docker-agent/api/json | grep -q '\"offline\":false'"
+log "controller: ${CONTROLLER_URL}  (user admin, password in .env)"
+```
+Line 7 runs the previous script. Line 9 sources `lib.sh` again on purpose: the first time it loaded, `.env` did not exist yet, so the passwords were not in the environment. Line 11 is the main action: `docker compose up --detach --build --wait --wait-timeout 600` builds the images, starts every service in the background (`--detach`), and waits until each has a healthy status or 600 seconds pass. Line 12 pushes the repository to the Git server container (next script). Line 13 uses `wait_for` with `bash -c "..."` so that the *whole pipeline* (a `curl` to the controller's node API piped into `grep`) is re-run each second: `-u admin:"${ADMIN_PASSWORD}"` authenticates, `grep -q '"offline":false'` succeeds silently when the JSON says the node is online. The `\"` and `\$` escapes keep the quoting correct through two layers of shell. Line 14 prints where to log in.
+
+#### `scripts/seed-project.sh`: put the repository on the Git server
+
+```bash
+#!/usr/bin/env bash
+# Pushes a snapshot of this repository (tracked files and new files that are not ignored) to the Git server inside
+# the compose project, as the repository the Jenkins job builds. Run it after any change you want Jenkins to see.
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+require git tar curl
+
+snapshot="$(mktemp -d)"
+trap 'rm -rf "${snapshot}"' EXIT
+(cd "${ROOT}" && git ls-files --cached --others --exclude-standard -z | xargs -0 tar -cf -) | tar -xf - -C "${snapshot}"
+
+git -C "${snapshot}" init --quiet --initial-branch=main
+git -C "${snapshot}" config user.name "Seed"
+git -C "${snapshot}" config user.email "seed@example.invalid"
+git -C "${snapshot}" config commit.gpgsign false
+git -C "${snapshot}" add --all
+git -C "${snapshot}" commit --quiet -m "Snapshot of controller-as-code"
+wait_for "the Git server" 60 curl -fsS "http://127.0.0.1:${GIT_PORT}/controller-as-code.git/info/refs?service=git-upload-pack"
+git -C "${snapshot}" push --quiet --force "http://127.0.0.1:${GIT_PORT}/controller-as-code.git" main
+log "seeded controller-as-code at $(git -C "${snapshot}" rev-parse --short HEAD)"
+```
+- Line 8 `mktemp -d` makes a fresh temporary folder; line 9 `trap '...' EXIT` registers a command that runs when the script ends for any reason, deleting the folder.
+- Line 10: a subshell `( ... )` changes into the repository and lists files with `git ls-files --cached --others --exclude-standard -z` (tracked files plus new files that are not ignored; `-z` separates names with a NUL byte so file names with spaces are safe). `xargs -0` turns that list into arguments for `tar -cf -`, which writes an archive to standard output; the pipe feeds it to `tar -xf - -C "${snapshot}"`, which unpacks it in the temporary folder. This copies exactly the files Git would include, without the `.git` history, `.env` or build output.
+- Lines 12-17 make a brand-new Git repository in that folder: `init --initial-branch=main`, set a placeholder author name and email (`.invalid` cannot be a real address), disable commit signing, stage everything (`add --all`), and commit. `git -C DIR` runs git as if started in DIR.
+- Line 18 waits (up to 60 seconds) for the Git server to answer its discovery URL `.../info/refs?service=git-upload-pack`.
+- Line 19 pushes with `--force`, replacing whatever was there, so the server always holds the current snapshot. Line 20 logs the short commit id.
+
+#### `scripts/lint-jenkinsfile.sh`: ask Jenkins to check the Jenkinsfile
+
+```bash
+#!/usr/bin/env bash
+# Asks the running controller to validate the Jenkinsfile with its own declarative linter.
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+require curl
+
+jar="$(mktemp)"
+trap 'rm -f "${jar}"' EXIT
+auth=(-u "admin:${ADMIN_PASSWORD:?run make up first}" -b "${jar}" -c "${jar}")
+crumb="$(curl -fsS "${auth[@]}" "${CONTROLLER_URL}/crumbIssuer/api/json" | sed -E 's/.*"crumbRequestField":"([^"]+)".*"crumb":"([^"]+)".*/\1:\2/')"
+result="$(curl -fsS "${auth[@]}" -H "${crumb}" -X POST --data-urlencode "jenkinsfile@${ROOT}/Jenkinsfile" \
+  "${CONTROLLER_URL}/pipeline-model-converter/validate")"
+echo "${result}"
+grep -q 'successfully validated' <<<"${result}"
+```
+Jenkins protects write requests with a *crumb*, a one-time token against forged requests. Line 7 makes a temp file used as a cookie jar (`-b` reads cookies from it, `-c` writes them), line 8 deletes it on exit. Line 9 builds an array of `curl` options: `-u` for basic authentication (`:?` aborts with a hint if the password is unset). `curl -fsS` means fail on HTTP errors (`-f`), stay quiet (`-s`) but still show errors (`-S`). Line 10 fetches the crumb as JSON and `sed -E` rewrites it into `FIELDNAME:VALUE`, the format of an HTTP header. Line 11 POSTs the Jenkinsfile as a form field (`--data-urlencode "jenkinsfile@FILE"` reads the field from the file) to the declarative linter. Line 13 prints the answer and line 14 makes the exit code succeed only if the answer contains "successfully validated" (`<<<` feeds a variable to a command as its input).
+
+#### `scripts/down.sh`: tear everything down
+
+```bash
+#!/usr/bin/env bash
+# Stops the stack and deletes its volumes (the controller's home, the agent's workspace and Maven cache, the Git repositories).
+set -euo pipefail
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+require docker
+
+cd "${ROOT}"
+docker compose down --volumes --remove-orphans
+```
+`docker compose down --volumes --remove-orphans` stops and removes the containers and network, deletes the named volumes (Jenkins' home, workspaces, the Git repositories) and also removes containers of services no longer in the file.
+
+#### `pipeline/scripts/publish.sh`: upload the jar with a token
+
+```bash
+#!/usr/bin/env bash
+# Uploads one file to the artifact store with a bearer token.
+#   TOKEN=... pipeline/scripts/publish.sh <file>
+# Environment: TOKEN (required), PUBLISH_URL (default http://publish-sink:8080).
+# The token travels in a header read from standard input, so it never appears in a process list or a trace.
+set -euo pipefail
+set +x
+
+file="${1:?usage: publish.sh <file>}"
+: "${TOKEN:?TOKEN must be set (bind the publish-token credential around this step)}"
+url="${PUBLISH_URL:-http://publish-sink:8080}"
+name="$(basename "${file}")"
+[ -f "${file}" ] || { echo "publish: no such file: ${file}" >&2; exit 2; }
+
+echo "publish: uploading ${name} ($(wc -c < "${file}" | tr -d ' ') bytes) to ${url}"
+response="$(printf 'Authorization: Bearer %s\n' "${TOKEN}" |
+  curl --silent --show-error --fail-with-body --max-time 60 \
+    --retry 3 --retry-delay 2 --retry-connrefused --retry-all-errors \
+    --header @- --upload-file "${file}" "${url}/artifacts/${name}")" || {
+  echo "publish: the store refused the upload" >&2
+  exit 1
+}
+echo "publish: stored ${response}"
+```
+Line 7, `set +x`, makes sure command tracing is off (`-x` would print every command with its values, including the token). Line 9 takes the first argument as the file (`:?` prints the usage when it is missing). Line 10 requires `TOKEN` in the environment. Line 11 gives `PUBLISH_URL` a default. Line 12 takes the file's base name. Line 13 `[ -f ... ] || { ...; exit 2; }` stops with exit code 2 if the file does not exist (`{ ...; }` groups several commands). Line 15 reports the size: `wc -c < file` counts bytes and `tr -d ' '` removes padding spaces. Lines 16-19 are the upload: `printf` writes the header line *into a pipe* so the token never appears as a command-line argument (which any user on the machine could read in the process list). `curl --header @-` reads headers from standard input, `--upload-file` sends the file with `PUT`, `--fail-with-body` fails on HTTP errors but still prints the body, `--max-time 60` limits the whole request, and `--retry 3 --retry-delay 2 --retry-connrefused --retry-all-errors` tries again on connection problems. Lines 19-22: if curl fails, report and exit 1. Line 23 prints what the store answered.
+
+#### `pipeline/scripts/test-summary.sh`: add up the JUnit XML reports
+
+```bash
+#!/usr/bin/env bash
+# Prints test totals from JUnit XML report directories (surefire, failsafe).
+#   test-summary.sh <report-dir>...
+# Exits 1 when any test failed or errored; 0 otherwise.
+set -euo pipefail
+
+[ "$#" -ge 1 ] || { echo "usage: test-summary.sh <report-dir>..." >&2; exit 2; }
+
+total=0 failed=0 errored=0 skipped=0
+for directory in "$@"; do
+  shopt -s nullglob
+  files=("${directory}"/TEST-*.xml)
+  shopt -u nullglob
+  if [ "${#files[@]}" -eq 0 ]; then
+    echo "${directory}: no reports"
+    continue
+  fi
+  run=0 bad=0 err=0 skip=0
+  for file in "${files[@]}"; do
+    header="$(grep -m1 -o '<testsuite [^>]*' "${file}")"
+    run=$((run + $(grep -o ' tests="[0-9]*"' <<<"${header}" | grep -o '[0-9]*')))
+    bad=$((bad + $(grep -o ' failures="[0-9]*"' <<<"${header}" | grep -o '[0-9]*')))
+    err=$((err + $(grep -o ' errors="[0-9]*"' <<<"${header}" | grep -o '[0-9]*')))
+    skip=$((skip + $(grep -o ' skipped="[0-9]*"' <<<"${header}" | grep -o '[0-9]*')))
+  done
+  printf '%s: %d tests, %d failed, %d errors, %d skipped\n' "${directory}" "${run}" "${bad}" "${err}" "${skip}"
+  total=$((total + run)); failed=$((failed + bad)); errored=$((errored + err)); skipped=$((skipped + skip))
+done
+printf 'total: %d tests, %d failed, %d errors, %d skipped\n' "${total}" "${failed}" "${errored}" "${skipped}"
+[ $((failed + errored)) -eq 0 ]
+```
+`"$#"` is the number of arguments; the usage guard on line 7 exits with code 2. Line 9 starts four counters. `for directory in "$@"` visits each report folder. `shopt -s nullglob` makes a pattern with no matches expand to nothing (not stay as the literal text); `files=( ... )` stores the matches in an *array*, and `"${#files[@]}"` is its length. With no reports the folder is reported and skipped (`continue` jumps to the next loop turn). Inside, line 20 pulls the opening `<testsuite ...>` tag of each XML file (`grep -m1` stops after the first match, `-o` prints only the matching part). Lines 21-24 extract the numbers: `grep -o ' tests="[0-9]*"'` finds the attribute and a second `grep -o '[0-9]*'` keeps just the digits; `$(( ... ))` adds them to the running counters. Lines 26-29 print one line per folder and a grand total with `printf '%d'` (a whole number). Line 30 is the exit status: `[ $((failed + errored)) -eq 0 ]` succeeds only if nothing failed.
+
+#### `agent/entrypoint.sh`: how the agent gets its secret
+
+```bash
+#!/bin/sh
+# Waits for the controller, reads this agent's connection secret from its API (authenticating with the admin
+# credentials from the environment), forgets the credentials, and starts the agent.
+set -eu
+
+: "${JENKINS_URL:?set JENKINS_URL}"
+: "${JENKINS_AGENT_NAME:?set JENKINS_AGENT_NAME}"
+: "${ADMIN_USER:=admin}"
+: "${ADMIN_PASSWORD:?set ADMIN_PASSWORD}"
+
+secret=""
+while [ -z "${secret}" ]; do
+  secret="$(curl -fsS -u "${ADMIN_USER}:${ADMIN_PASSWORD}" "${JENKINS_URL}/computer/${JENKINS_AGENT_NAME}/jenkins-agent.jnlp" 2>/dev/null |
+    sed -n 's:.*<argument>\([0-9a-f]\{64\}\)</argument>.*:\1:p' | head -n 1 || true)"
+  [ -n "${secret}" ] || { echo "waiting for the controller to offer a secret for ${JENKINS_AGENT_NAME}"; sleep 3; }
+done
+
+unset ADMIN_PASSWORD
+export JENKINS_SECRET="${secret}" JENKINS_WEB_SOCKET=true
+exec /usr/local/bin/jenkins-agent
+```
+This one uses `#!/bin/sh` and `set -eu` (no `pipefail`, which plain `sh` lacks). Lines 6-9 use the `:` no-op command with parameter expansion purely for its checks: `:?` aborts if the variable is missing, `:=` assigns a default (`ADMIN_USER` becomes `admin`). Lines 11-16 loop until `secret` is non-empty: `curl -u USER:PASSWORD .../computer/NAME/jenkins-agent.jnlp` downloads the XML file the controller makes for that node; `sed -n 's:...:\1:p'` prints just the 64-hex-character text inside `<argument>`; `head -n 1` keeps the first; `|| true` stops a failing curl from killing the script (so the loop retries). If still empty, line 15 prints a message and sleeps 3 seconds. Line 18 `unset ADMIN_PASSWORD` removes the password from the environment before the agent starts. Line 19 exports the secret and tells the agent to use WebSocket. Line 20 `exec` replaces the shell with the agent program, so the agent becomes the container's main process and receives stop signals directly.
+
+#### `services/git-server/entrypoint.sh`: create repositories and serve them
+
+```bash
+#!/bin/sh
+# Creates the bare repositories named in REPOS (space separated, without .git), then serves them.
+set -eu
+
+for repo in ${REPOS:?set REPOS to the repository names to create}; do
+  path="/srv/git/${repo}.git"
+  if [ ! -d "${path}" ]; then
+    git init --quiet --bare --initial-branch=main "${path}"
+    git -C "${path}" config http.receivepack true
+  fi
+done
+
+rm -f /tmp/fcgiwrap.sock
+fcgiwrap -s unix:/tmp/fcgiwrap.sock &
+exec nginx -g 'daemon off;'
+```
+Line 5 loops over the words in `REPOS` (left unquoted on purpose so the shell splits it on spaces). For each name, line 7 `[ ! -d PATH ]` tests "folder does not exist"; then `git init --bare` creates a *bare* repository (history only, no checked-out files, which is what a server stores) and `config http.receivepack true` allows pushes over HTTP. Line 13 removes a stale socket file from a previous run. Line 14 starts `fcgiwrap`, a small program that lets nginx run CGI programs such as git's web backend, listening on a Unix socket file; the final `&` runs it in the background. Line 15 `exec nginx -g 'daemon off;'` replaces the shell with nginx in the foreground, which keeps the container alive.
+<!-- full-walkthrough:end -->
+
 ## 6. Try it yourself
 
 1. `shellcheck scripts/*.sh pipeline/scripts/*.sh agent/entrypoint.sh` : no output.

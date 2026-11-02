@@ -91,6 +91,132 @@ The agent reaches the controller at `http://controller:8080` (service name). `ag
 
 `volumes:` at the bottom declares `jenkins_home`, `agent_work`, `maven_cache`, `git_repos`.
 
+
+
+
+
+
+<!-- full-walkthrough:begin -->
+### 5.A Full walkthrough: every line of `docker-compose.yml`
+
+Docker Compose reads one YAML file that describes a set of containers (called **services**) that run together, and starts, networks and stops them with one command. YAML is a text format built from indentation: a line `key: value` is a setting, a line starting with `- ` is one item of a list, and everything indented under a key belongs to that key. Compose puts all services of the file on one private network where each service can reach the others by its service name (for example `http://controller:8080`).
+
+```yaml
+# The controller, its agent, the Git server it builds from and the artifact store it publishes to. Credentials come
+# from .env (created by `make up`), never from this file.
+---
+name: jenkins-controller-as-code
+```
+- Lines 1-2 are comments explaining the file; the credentials are never written here.
+- Line 3, `---`, marks the start of a YAML document. It is optional but makes editors and `yamllint` happy.
+- Line 4, `name:` sets the **project name**. Compose prefixes the names of the containers, networks and volumes it creates with it, so two projects on the same computer cannot collide.
+
+```yaml
+services:
+  git-server:
+    build:
+      context: services/git-server
+      args:
+        BASE_IMAGE: alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
+    environment:
+      REPOS: controller-as-code
+    ports:
+      - "127.0.0.1:${GIT_PORT:-18480}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp:uid=10001,gid=10001
+    volumes:
+      - git_repos:/srv/git
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+```
+This is the first service, `git-server`: a tiny web server that hosts Git repositories so the Jenkins job has somewhere to fetch its code from.
+
+- `build:` tells Compose to build the image from a Dockerfile instead of downloading a ready one. `context: services/git-server` is the folder sent to the builder (it contains the Dockerfile).
+- `args:` passes build arguments. `BASE_IMAGE` is the starting image. The text after `@sha256:` is a **digest**: a fingerprint of the exact image bytes. Pinning by digest means a later change to the `alpine:3.24.3` tag cannot silently change what you build.
+- `environment:` sets environment variables inside the container. `REPOS: controller-as-code` names the repository the entrypoint should create.
+- `ports:` publishes a container port on the host. The format is `host-address:host-port:container-port`. `127.0.0.1` means "only this computer can connect". `${GIT_PORT:-18480}` is variable substitution: use the value of `GIT_PORT` from the environment or `.env`, or `18480` if it is unset or empty.
+- `read_only: true` mounts the container's root filesystem read-only, so a compromised process cannot write to it.
+- `tmpfs:` gives the container a temporary in-memory folder at `/tmp` because the web server still needs somewhere to write. `uid=10001,gid=10001` makes it owned by the unprivileged user the image runs as.
+- `volumes:` mounts the named volume `git_repos` at `/srv/git`, so the repositories survive the container being recreated.
+- `cap_drop: [ALL]` removes all Linux capabilities (special root-only powers, such as changing file ownership or binding low ports) from the container.
+- `security_opt: ["no-new-privileges:true"]` forbids any process inside from gaining more privileges than it started with (for example through a setuid program).
+
+```yaml
+  publish-sink:
+    build:
+      context: services/publish-sink
+      args:
+        BASE_IMAGE: python:3.13-slim-bookworm@sha256:fa16c23a012723c24eef39cc755a27babbba16b711e5d1e6cf16225ad21637cd
+    environment:
+      EXPECTED_TOKEN: ${PUBLISH_TOKEN:?run make up, which creates .env}
+    ports:
+      - "127.0.0.1:${SINK_PORT:-18482}:8080"
+    read_only: true
+    tmpfs:
+      - /data:uid=10001,gid=10001
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+```
+The artifact store, `publish-sink`, which receives the jar the pipeline publishes. It follows the same pattern: a pinned Python image, a read-only root, a tmpfs at `/data`, no capabilities. The new piece is line 30: `${PUBLISH_TOKEN:?run make up, which creates .env}`. The `:?` form means "if the variable is unset or empty, stop with this message". So `docker compose up` refuses to start without a token, and the token comes from the `.env` file that `make up` creates, never from a file in Git.
+
+```yaml
+  controller:
+    build:
+      context: controller
+    image: my-controller:1
+    environment:
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?run make up, which creates .env}
+      PUBLISH_TOKEN: ${PUBLISH_TOKEN:?run make up, which creates .env}
+    ports:
+      - "127.0.0.1:${CONTROLLER_PORT:-18481}:8080"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+    depends_on:
+      git-server:
+        condition: service_started
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+```
+The Jenkins `controller`.
+
+- `image: my-controller:1` names the image Compose builds, so other tools and the rebuild test can refer to it.
+- Two secrets are passed as environment variables: `ADMIN_PASSWORD` and `PUBLISH_TOKEN`, both with the same "must be set" rule. The configuration-as-code file reads them with `${...}`.
+- The controller's port 8080 is published on `127.0.0.1:18481` by default.
+- `jenkins_home:/var/jenkins_home` is the named volume holding Jenkins' state (job history, builds), the one thing that is allowed to be lost and rebuilt from Git.
+- `depends_on` with `condition: service_started` makes Compose start `git-server` before the controller. The controller needs the repository when the first build runs.
+- `cap_drop` and `no-new-privileges` repeat the hardening of the other services.
+
+```yaml
+  agent:
+    build:
+      context: agent
+    image: my-agent:1
+    environment:
+      JENKINS_URL: http://controller:8080
+      JENKINS_AGENT_NAME: docker-agent
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?run make up, which creates .env}
+    volumes:
+      - agent_work:/home/jenkins/agent
+      - maven_cache:/home/jenkins/.m2
+    depends_on:
+      controller:
+        condition: service_healthy
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+```
+The build `agent`. `JENKINS_URL` is where to find the controller (by service name), `JENKINS_AGENT_NAME` is the node name to claim, and the admin password lets the entrypoint ask the controller for the agent's connection secret. Two volumes: `agent_work` is the agent's workspace folder and `maven_cache` keeps downloaded Maven libraries between builds so they are not downloaded every time. `condition: service_healthy` is stricter than `service_started`: Compose waits until the controller's `HEALTHCHECK` (from the Dockerfile) reports healthy before starting the agent.
+
+```yaml
+volumes:
+  jenkins_home:
+  agent_work:
+  maven_cache:
+  git_repos:
+```
+The top-level `volumes:` block declares the four named volumes. Each name is followed by nothing, which means "create it with default settings". Named volumes are managed by Docker and live until `docker compose down --volumes` deletes them (the `down` script does that).
+<!-- full-walkthrough:end -->
+
 ## 6. Try it yourself
 
 1. `ADMIN_PASSWORD=x PUBLISH_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxx docker compose config --quiet; echo $?` : `0`.
