@@ -2,6 +2,13 @@
 
 All notable changes to this project are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- The agent's Maven cache volume is writable by the build user (found by the first live run).
+- The stack tests start the parameterised job with a parameter, read the test report's `passCount`, `failCount` and `skipCount`, and approve with a form body; `scripts/lint-jenkinsfile.sh` reads the crumb fields in the right order.
+
 ## [0.1.0] - 2026-10-27
 
 ### Added

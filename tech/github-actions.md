@@ -51,6 +51,7 @@ jobs:
 ```
 `actions/setup-java@v4` installs a JDK (here Temurin 21) so Maven can compile. The `lint` job runs `make lint`, which includes `checkstyle:check` on the Java. The `offline` job runs the Python tests, then the whole Maven lifecycle (`verify`: compile, unit tests, package, integration tests, coverage rule), then the dependency audit. The `stack` job uses the Docker that GitHub's runners already have: `make up` builds and starts the stack, `make run` runs the end-to-end test. `if: failure()` makes the last step run **only** when an earlier step failed, printing the last 200 lines of every container's log (`--no-color` keeps the log readable). None of this has run on GitHub: the repository has not been pushed.
 
+
 <!-- full-walkthrough:begin -->
 ### 5.A Full walkthrough: `.github/workflows/ci.yml`
 

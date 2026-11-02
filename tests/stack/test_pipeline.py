@@ -26,8 +26,8 @@ def sink_artifacts(env: dict[str, str]) -> list[str]:
 
 @pytest.fixture(scope="module")
 def first_build(jenkins: Jenkins) -> int:
-    """The first run registers the Jenkinsfile's parameters, so it is started without any."""
-    number = jenkins.trigger(JOB)
+    """A run with the default parameters: the job declares them in the configuration file, so it must be started with them."""
+    number = jenkins.trigger(JOB, {"REQUIRE_APPROVAL": "false"})
     jenkins.wait_finished(JOB, number)
     return number
 
@@ -36,9 +36,9 @@ def test_a_run_succeeds_publishes_the_report_and_archives_the_jar(jenkins: Jenki
     build = jenkins.build(JOB, first_build)
 
     assert build.result == "SUCCESS", jenkins.console(JOB, first_build)[-3000:]
-    report = jenkins.get_json(f"/job/{JOB}/{first_build}/testReport/api/json?tree=totalCount,failCount,skipCount")
+    report = jenkins.get_json(f"/job/{JOB}/{first_build}/testReport/api/json?tree=passCount,failCount,skipCount")
     assert report["failCount"] == 0
-    assert report["totalCount"] >= 30
+    assert report["passCount"] + report["skipCount"] >= 30
     artifacts = jenkins.get_json(f"/job/{JOB}/{first_build}/api/json?tree=artifacts[fileName]")["artifacts"]
     assert [artifact["fileName"] for artifact in artifacts] == ["order-summary-1.0.0.jar"]
 
@@ -86,9 +86,9 @@ def test_a_failing_test_fails_the_build_publishes_the_report_and_archives_nothin
     build = jenkins.wait_finished(JOB, number)
 
     assert build.result == "FAILURE"
-    report = jenkins.get_json(f"/job/{JOB}/{number}/testReport/api/json?tree=failCount,totalCount")
+    report = jenkins.get_json(f"/job/{JOB}/{number}/testReport/api/json?tree=failCount,passCount")
     assert report["failCount"] == 1
-    assert report["totalCount"] > 1
+    assert report["passCount"] > 1
     assert jenkins.get_json(f"/job/{JOB}/{number}/api/json?tree=artifacts[fileName]")["artifacts"] == []
     assert "Publish" not in {name for name, stage in stages(jenkins, number).items() if stage["status"] == "SUCCESS"}
 

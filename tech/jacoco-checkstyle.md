@@ -32,6 +32,7 @@ The modules it enables: `NewlineAtEndOfFile`, `FileTabCharacter` (no tabs), `Lin
 
 
 
+
 <!-- full-walkthrough:begin -->
 ### 5.A Full walkthrough: `app/config/checkstyle/checkstyle.xml`
 

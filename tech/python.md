@@ -68,6 +68,7 @@ The resolver (see the plugins note): `re.search` to read the version from the Do
 
 
 
+
 <!-- full-walkthrough:begin -->
 ### 5.A Full walkthrough: every line of the Python scripts and helpers
 
@@ -526,11 +527,11 @@ class Jenkins:
         inputs = self.pending_inputs(job, number)
         if len(inputs) != 1:
             raise JenkinsError(409, f"/job/{job}/{number}", f"expected one pending input, found {len(inputs)}")
-        status, body = self.post(str(inputs[0]["proceedUrl"]))
+        status, body = self.post(str(inputs[0]["proceedUrl"]), {"json": "{}"})
         if status not in (200, 302):
             raise JenkinsError(status, inputs[0]["proceedUrl"], body)
 ```
-`pending_inputs` lists the `input` steps a build is paused on (from the pipeline stage API `wfapi`). `approve` demands exactly one, then POSTs to the "proceed" URL Jenkins provides. A redirect (302) counts as success.
+`pending_inputs` lists the `input` steps a build is paused on (from the pipeline stage API `wfapi`). `approve` demands exactly one, then POSTs to the "proceed" URL Jenkins provides with the form field `json` set to `{}` (an empty JSON object). Without a form body Jenkins answers `400 This page expects a form submission`, because the endpoint reads the answers to the input's parameters from that field and this input has none. A redirect (302) counts as success.
 
 ```python
     def burst(self, job: str, count: int, parameters: Mapping[str, str] | None = None) -> list[int]:

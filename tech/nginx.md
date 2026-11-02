@@ -38,6 +38,7 @@ In this stack the repository is created empty and filled by `scripts/seed-projec
 
 
 
+
 <!-- full-walkthrough:begin -->
 ### 5.A Full walkthrough: every line of `services/git-server/nginx.conf`
 

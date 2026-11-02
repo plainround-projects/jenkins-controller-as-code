@@ -44,6 +44,7 @@ What the offline tests prove: the publish script sends the token only in a heade
 
 
 
+
 <!-- full-walkthrough:begin -->
 ### 5.A Full walkthrough: every test file
 
@@ -1112,22 +1113,22 @@ def sink_artifacts(env: dict[str, str]) -> list[str]:
 
 @pytest.fixture(scope="module")
 def first_build(jenkins: Jenkins) -> int:
-    """The first run registers the Jenkinsfile's parameters, so it is started without any."""
-    number = jenkins.trigger(JOB)
+    """A run with the default parameters: the job declares them in the configuration file, so it must be started with them."""
+    number = jenkins.trigger(JOB, {"REQUIRE_APPROVAL": "false"})
     jenkins.wait_finished(JOB, number)
     return number
 
 ```
-`stages` maps stage names to their JSON from the stage-view API. `sink_artifacts` asks the artifact store which files it holds. The `first_build` fixture (module scope: once for the whole file) starts the job without parameters, because the first run of a pipeline job is what makes Jenkins learn the parameters declared in the Jenkinsfile, and waits for it to finish.
+`stages` maps stage names to their JSON from the stage-view API. `sink_artifacts` asks the artifact store which files it holds. The `first_build` fixture (module scope: once for the whole file) starts the job with one default parameter and waits for it to finish. It must send a parameter: the job declares its three parameters in the configuration file, and Jenkins refuses a plain "build" request for a parameterised job with `400 Nothing is submitted`, so the client uses the `buildWithParameters` address.
 
 ```python
 def test_a_run_succeeds_publishes_the_report_and_archives_the_jar(jenkins: Jenkins, first_build: int) -> None:
     build = jenkins.build(JOB, first_build)
 
     assert build.result == "SUCCESS", jenkins.console(JOB, first_build)[-3000:]
-    report = jenkins.get_json(f"/job/{JOB}/{first_build}/testReport/api/json?tree=totalCount,failCount,skipCount")
+    report = jenkins.get_json(f"/job/{JOB}/{first_build}/testReport/api/json?tree=passCount,failCount,skipCount")
     assert report["failCount"] == 0
-    assert report["totalCount"] >= 30
+    assert report["passCount"] + report["skipCount"] >= 30
     artifacts = jenkins.get_json(f"/job/{JOB}/{first_build}/api/json?tree=artifacts[fileName]")["artifacts"]
     assert [artifact["fileName"] for artifact in artifacts] == ["order-summary-1.0.0.jar"]
 
@@ -1152,7 +1153,7 @@ def test_the_publish_step_reached_the_artifact_store(env: dict[str, str], first_
     assert "order-summary-1.0.0.jar" in sink_artifacts(env)
 
 ```
-The first test requires `SUCCESS`, no failed tests, at least 30 tests in total, and exactly one archived artifact, the jar. The parallel test finds the latest start and the earliest end of the two branches and asserts `started_last < finished_first`, which is true only if their time ranges overlap. The agent test looks for "Running on docker-agent" in the console and no "Running on Jenkins in" (which would mean the controller ran it). The publish test lists the store.
+The first test requires `SUCCESS`, no failed tests, at least 30 passed or skipped tests (the test-report API exposes `passCount`, `failCount` and `skipCount`, not a total), and exactly one archived artifact, the jar. The parallel test finds the latest start and the earliest end of the two branches and asserts `started_last < finished_first`, which is true only if their time ranges overlap. The agent test looks for "Running on docker-agent" in the console and no "Running on Jenkins in" (which would mean the controller ran it). The publish test lists the store.
 
 ```python
 def test_the_token_never_appears_in_the_log_even_when_the_step_echoes_it(jenkins: Jenkins, env: dict[str, str], first_build: int) -> None:
@@ -1181,9 +1182,9 @@ def test_a_failing_test_fails_the_build_publishes_the_report_and_archives_nothin
     build = jenkins.wait_finished(JOB, number)
 
     assert build.result == "FAILURE"
-    report = jenkins.get_json(f"/job/{JOB}/{number}/testReport/api/json?tree=failCount,totalCount")
+    report = jenkins.get_json(f"/job/{JOB}/{number}/testReport/api/json?tree=failCount,passCount")
     assert report["failCount"] == 1
-    assert report["totalCount"] > 1
+    assert report["passCount"] > 1
     assert jenkins.get_json(f"/job/{JOB}/{number}/api/json?tree=artifacts[fileName]")["artifacts"] == []
     assert "Publish" not in {name for name, stage in stages(jenkins, number).items() if stage["status"] == "SUCCESS"}
 
@@ -1209,7 +1210,7 @@ def test_the_jenkinsfile_passes_the_controllers_own_linter(root: Path, jenkins: 
     assert status == 200
     assert "successfully validated" in body
 ```
-The failing-test run (`BREAK_A_TEST=true`) must end `FAILURE`, report exactly one failed test out of several, archive nothing, and never show Publish as successful. The approval run waits for a pending input, then reads the agent's executors and asserts none is busy (`currentExecutable` empty), that the build is still `building`, approves, and expects `SUCCESS`. The last test posts the Jenkinsfile to the controller's own linter and expects "successfully validated". The function-level `import` inside the approval test is allowed, only done once there.
+The failing-test run (`BREAK_A_TEST=true`) must end `FAILURE`, report exactly one failed test and more than one passing test, archive nothing, and never show Publish as successful. The approval run waits for a pending input, then reads the agent's executors and asserts none is busy (`currentExecutable` empty), that the build is still `building`, approves, and expects `SUCCESS`. The last test posts the Jenkinsfile to the controller's own linter and expects "successfully validated". The function-level `import` inside the approval test is allowed, only done once there.
 
 #### `tests/stack/test_rebuild.py`: destroy and recreate the controller
 
@@ -1256,7 +1257,7 @@ def test_destroying_the_container_and_the_volume_gives_the_same_configuration(ro
     wait_until("the agent to reconnect", lambda: not fresh.get_json("/computer/docker-agent/api/json?tree=offline")["offline"], timeout=300)
     assert effective_configuration(fresh) == before
 
-    number = fresh.trigger(JOB)
+    number = fresh.trigger(JOB, {"REQUIRE_APPROVAL": "false"})
     assert fresh.wait_finished(JOB, number).result == "SUCCESS"
     assert fresh.build(JOB, number).number == 1, "a rebuilt controller starts with no build history"
 ```

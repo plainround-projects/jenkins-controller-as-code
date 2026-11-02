@@ -7,7 +7,7 @@ require curl
 jar="$(mktemp)"
 trap 'rm -f "${jar}"' EXIT
 auth=(-u "admin:${ADMIN_PASSWORD:?run make up first}" -b "${jar}" -c "${jar}")
-crumb="$(curl -fsS "${auth[@]}" "${CONTROLLER_URL}/crumbIssuer/api/json" | sed -E 's/.*"crumbRequestField":"([^"]+)".*"crumb":"([^"]+)".*/\1:\2/')"
+crumb="$(curl -fsS "${auth[@]}" "${CONTROLLER_URL}/crumbIssuer/api/json" | sed -E 's/.*"crumb":"([^"]+)".*"crumbRequestField":"([^"]+)".*/\2:\1/')"
 result="$(curl -fsS "${auth[@]}" -H "${crumb}" -X POST --data-urlencode "jenkinsfile@${ROOT}/Jenkinsfile" \
   "${CONTROLLER_URL}/pipeline-model-converter/validate")"
 echo "${result}"

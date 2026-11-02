@@ -5,5 +5,9 @@ FROM ${AGENT_IMAGE}
 
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/agent-entrypoint.sh
 
+# The Maven cache volume is mounted here. A new named volume takes the owner of the folder it covers in the image, so
+# the folder must exist and belong to the build user, or the Maven wrapper cannot write its download.
+USER root
+RUN mkdir -p /home/jenkins/.m2 && chown jenkins:jenkins /home/jenkins/.m2
 USER jenkins
 ENTRYPOINT ["/usr/local/bin/agent-entrypoint.sh"]

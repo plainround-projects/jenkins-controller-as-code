@@ -96,6 +96,7 @@ The agent reaches the controller at `http://controller:8080` (service name). `ag
 
 
 
+
 <!-- full-walkthrough:begin -->
 ### 5.A Full walkthrough: every line of `docker-compose.yml`
 

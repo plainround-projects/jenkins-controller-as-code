@@ -67,6 +67,7 @@ Alpine, `RUN apk add --no-cache git git-daemon nginx fcgiwrap tini` (`apk` is Al
 
 
 
+
 <!-- full-walkthrough:begin -->
 ### 5.A Full walkthrough: every line of the four Dockerfiles
 
@@ -110,10 +111,14 @@ FROM ${AGENT_IMAGE}
 
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/agent-entrypoint.sh
 
+# The Maven cache volume is mounted here. A new named volume takes the owner of the folder it covers in the image, so
+# the folder must exist and belong to the build user, or the Maven wrapper cannot write its download.
+USER root
+RUN mkdir -p /home/jenkins/.m2 && chown jenkins:jenkins /home/jenkins/.m2
 USER jenkins
 ENTRYPOINT ["/usr/local/bin/agent-entrypoint.sh"]
 ```
-The agent starts from the official Jenkins inbound-agent image (already includes Java 21 and git), pinned by digest. `COPY --chmod=0755` copies the entrypoint script and marks it executable in one step. `USER jenkins` makes sure the container does not run as root. `ENTRYPOINT ["..."]` in the *JSON array* form runs the program directly, without a shell wrapping it, so signals reach it.
+The agent starts from the official Jenkins inbound-agent image (already includes Java 21 and git), pinned by digest. `COPY --chmod=0755` copies the entrypoint script and marks it executable in one step. The `USER root`, `RUN` and second `USER jenkins` lines (with the comment above them) exist because of a fault the first live run exposed: Compose mounts the named volume `maven_cache` at `/home/jenkins/.m2`, and Docker gives a new named volume the owner of the folder it covers *in the image*. If the folder does not exist there, the volume is owned by root and the build user cannot write the Maven wrapper's download (`mkdir: cannot create directory '/home/jenkins/.m2/wrapper': Permission denied`). `mkdir -p` creates the folder and `chown jenkins:jenkins` hands it to the build user; both need root, so the image switches to root for that one line. The last `USER jenkins` makes sure the container does not run as root. `ENTRYPOINT ["..."]` in the *JSON array* form runs the program directly, without a shell wrapping it, so signals reach it.
 
 #### `services/git-server/Dockerfile`
 

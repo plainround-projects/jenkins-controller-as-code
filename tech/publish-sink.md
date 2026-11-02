@@ -56,6 +56,7 @@ def put(self, name: str, content: bytes) -> Stored:
 
 
 
+
 <!-- full-walkthrough:begin -->
 ### 5.A Full walkthrough: every line of the `publish-sink` package
 

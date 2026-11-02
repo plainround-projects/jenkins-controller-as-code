@@ -123,6 +123,7 @@ Runs only when the parameter is true. `agent none` means it holds no executor wh
 
 
 
+
 <!-- full-walkthrough:begin -->
 ### 5.A Full walkthrough: every line of the `Jenkinsfile`
 

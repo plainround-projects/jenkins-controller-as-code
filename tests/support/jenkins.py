@@ -140,7 +140,7 @@ class Jenkins:
         inputs = self.pending_inputs(job, number)
         if len(inputs) != 1:
             raise JenkinsError(409, f"/job/{job}/{number}", f"expected one pending input, found {len(inputs)}")
-        status, body = self.post(str(inputs[0]["proceedUrl"]))
+        status, body = self.post(str(inputs[0]["proceedUrl"]), {"json": "{}"})
         if status not in (200, 302):
             raise JenkinsError(status, inputs[0]["proceedUrl"], body)
 

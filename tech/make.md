@@ -78,6 +78,7 @@ Three steps: offline Python tests with coverage, the whole Maven lifecycle, then
 
 
 
+
 <!-- full-walkthrough:begin -->
 ### 5.A Full walkthrough: every line of the `Makefile`
 

@@ -37,6 +37,6 @@ def test_destroying_the_container_and_the_volume_gives_the_same_configuration(ro
     wait_until("the agent to reconnect", lambda: not fresh.get_json("/computer/docker-agent/api/json?tree=offline")["offline"], timeout=300)
     assert effective_configuration(fresh) == before
 
-    number = fresh.trigger(JOB)
+    number = fresh.trigger(JOB, {"REQUIRE_APPROVAL": "false"})
     assert fresh.wait_finished(JOB, number).result == "SUCCESS"
     assert fresh.build(JOB, number).number == 1, "a rebuilt controller starts with no build history"

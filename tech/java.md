@@ -97,6 +97,7 @@ The POM compiles with `-Xlint:all -Werror`: **every compiler warning is an error
 
 
 
+
 <!-- full-walkthrough:begin -->
 ### 5.A Full walkthrough: every production Java file
 

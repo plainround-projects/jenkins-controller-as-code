@@ -78,6 +78,7 @@ The pipeline's flags: `--batch-mode` (no colors or prompts), `--no-transfer-prog
 
 
 
+
 <!-- full-walkthrough:begin -->
 ### 5.A Full walkthrough: `app/pom.xml`
 

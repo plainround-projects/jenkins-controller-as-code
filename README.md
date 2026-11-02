@@ -121,20 +121,19 @@ Dependency rule: in `app/`, domain depends on nothing, application on domain, in
 
 ## Verification status
 
-Verified on 2026-10-27 in the session that built this repository:
+Verified on 2026-10-27 (offline) and 2026-11-02 (live stack) in the sessions that built this repository:
 
 - The Java project: `./mvnw verify` in `app/` passes (33 unit tests, 9 integration tests, JaCoCo 95 percent gate on domain and application, ArchUnit layering, `-Xlint:all -Werror`), `checkstyle:check` passes, and the pipeline's own goal sequence (`jacoco:prepare-agent@agent surefire:test`, `failsafe:integration-test failsafe:verify`, `jacoco:report@report jacoco:check@coverage`) runs; `BREAK_A_TEST=true` makes exactly one unit test fail.
 - `make test-offline`: 73 tests pass at 95 percent coverage, including the Jenkins API client against a fake controller, the pipeline scripts against a real HTTP artifact store, the artifact store, the Jenkinsfile's structure and the controller's configuration; `yamllint`, `shellcheck`, `ruff` and `mypy` pass.
 - The three images build, and the plugin lock (80 plugins) was resolved by running `jenkins-plugin-cli` on the pinned image; `scripts/plugins_lock.py` reproduces the same set from the update center without Docker.
-- The Compose stack started, but the controller took longer than its health check allows to finish loading under that load, so the end-to-end run did not happen.
+- The live stack, on 2026-11-02, one command at a time on an otherwise busy Docker (about two dozen containers from other projects): `make up` builds the four images and starts the controller, agent, Git server and artifact store (all healthy, the agent online, the repository seeded); `make run` passes 15 of 15 end-to-end tests (no setup wizard, anonymous users refused, the running plugin set equal to the lock file, the agent online with its label, the job and the credential coming from the configuration file, a green run with a test report and the archived jar, the Unit and Integration stages overlapping in time, the build on the agent and never on the controller, the masked token, a failing test failing the build with nothing archived, an approval that holds no executor, the Jenkinsfile accepted by the controller's own linter); `make test` passes (73 offline tests at 95 percent coverage, the Java project's 33 unit and 9 integration tests, and the 15 end-to-end tests); `make rebuild-proof` passes (the controller and its volume destroyed, started again, the effective configuration identical and the first build number 1); `make lint-jenkinsfile` prints "Jenkinsfile successfully validated."; `make lint` passes. `make down` removed everything afterwards.
 
-Not completed in that session, and why: the Mac the repositories were built on was out of memory and swap for most of the night (swap at about 70 GB, load average above 150, Docker's virtual machine at full CPU, and its disk went read-only once), shared with a dozen other builds. kind's control plane failed to start about fifteen times in a row (kubeadm's fixed deadlines), which is why k3d is the default provider; a k3d cluster did start, but its API server then stopped answering and `make up` could not finish. The cluster/stack commands above are written to run on a quiet machine (`make up && make run && make rebuild-proof`); until they have run once on yours, treat the end-to-end run (parallel stages, report, artifact, masked token, approval) and the rebuild proof as unproven. Nothing in this repository was marked passing that did not run.
+What the live run found that the offline checks could not (all fixed, and each now has a test or is covered by one):
 
-Pending capacity (nothing below ran; each is a Docker or cluster step):
-
-- `make up`: pending capacity: run `make up` after Docker Desktop is restarted with free disk (Docker.raw was at its 60 GiB cap on 2026-10-28).
-- `make run`: pending capacity: run `make run` after Docker Desktop is restarted with free disk (Docker.raw was at its 60 GiB cap on 2026-10-28).
-- `make rebuild-proof`: pending capacity: run `make rebuild-proof` after Docker Desktop is restarted with free disk (Docker.raw was at its 60 GiB cap on 2026-10-28).
+- The agent's `maven_cache` volume was owned by root, so the Maven wrapper could not write its download. `agent/Dockerfile` now creates `/home/jenkins/.m2` owned by the build user.
+- The job declares its parameters in the configuration file, so a build request without parameters is refused with `400 Nothing is submitted`; the tests start it with a default parameter.
+- The test-report API has no `totalCount` field; the tests use `passCount`, `failCount` and `skipCount`.
+- The approval call needs a form body (`json={}`); `scripts/lint-jenkinsfile.sh` read the crumb's two JSON fields in the wrong order.
 
 ## Author and license
 

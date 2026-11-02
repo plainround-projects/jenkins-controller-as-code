@@ -25,6 +25,7 @@ One file configures pytest, coverage, ruff and mypy and pins the Python dependen
 
 The file has the usual shape: `[project]` with `dependencies = ["pyyaml==6.0.3"]`, `[project.optional-dependencies] dev = [...]` (pytest, pytest-cov, ruff, mypy, yamllint, `types-PyYAML`, all exact), and `[tool.*]` tables. What is specific here: `pythonpath = [".", "services/publish-sink"]`; two markers (`stack`, `rebuild`); coverage over `tests/support` and `services/publish-sink/publish_sink`; `line-length = 140`; extra ruff ignores; `files = ["tests", "services/publish-sink", "scripts"]` with `explicit_package_bases` and `mypy_path`. Each table is explained in the note for its tool.
 
+
 <!-- full-walkthrough:begin -->
 ### 5.A Full walkthrough: `pyproject.toml`
 
