@@ -12,7 +12,7 @@ This document describes what is in this repository and why it is shaped this way
 | **Build agent** | [`agent/`](agent), the `agent` service | The official inbound agent (JDK 21, git) plus an entrypoint that reads its own connection secret from the controller. Runs the Maven build. Has no access to the controller's home. |
 | **Project Jenkinsfile** | [`Jenkinsfile`](Jenkinsfile), plus the scripts in [`pipeline/scripts`](pipeline/scripts) | The pipeline as code: lint, build, parallel tests with their own reports, coverage, an optional approval, publish. |
 | **Deploy token** | the `PUBLISH_TOKEN` environment variable of the controller | A Jenkins credential created from the environment; bound to the publish step alone. |
-| **Git server** | [`services/git-server`](services/git-server) | Holds a snapshot of this repository (`scripts/seed-project.sh`), which is what the job checks out. |
+| **Git server** | [`services/git-server`](services/git-server) | Holds a snapshot of this repository (`scripts/seed-project.sh`), which is what the job builds from. The job uses `lightweight(true)`: the controller fetches only the Jenkinsfile, and the agent checks out the workspace. |
 | **Artifact store** | [`services/publish-sink`](services/publish-sink) | Accepts `PUT /artifacts/<name>` only with the right bearer token; the proof that the credential reached the one step that needs it. |
 | **order-summary** | [`app/`](app) | The Java project the pipeline builds: a CSV of orders summarized per customer. Layered, typed, tested. |
 | **Tests** | [`tests/`](tests) | Unit tests of the scripts, the store, the configuration and the Jenkinsfile; stack tests that drive Jenkins through its API. |
@@ -50,7 +50,8 @@ flowchart LR
     env --> ctrl
     env -. "admin password, only to read the agent secret" .-> agent
     jf -- "seed-project.sh" --> gitsrv
-    ctrl -- "checkout" --> gitsrv
+    ctrl -- "fetch the Jenkinsfile only (lightweight)" --> gitsrv
+    agent -- "checkout the workspace" --> gitsrv
     ctrl -- "schedule (WebSocket)" --> agent
     agent -- "publish.sh: Bearer token, one step" --> sink
 ```

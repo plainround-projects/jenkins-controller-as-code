@@ -10,6 +10,7 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ### Fixed
 
+- ARCHITECTURE.md and README now match the code where they disagreed (see the drawn figures).
 - The agent's Maven cache volume is writable by the build user (found by the first live run).
 - The stack tests start the parameterised job with a parameter, read the test report's `passCount`, `failCount` and `skipCount`, and approve with a form body; `scripts/lint-jenkinsfile.sh` reads the crumb fields in the right order.
 
