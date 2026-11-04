@@ -9,6 +9,24 @@ A Jenkins controller in a container whose whole configuration, from plugins and 
 | **Level** | Beginner |
 | **Architecture** | [ARCHITECTURE.md](ARCHITECTURE.md), decisions in [docs/adr](docs/adr) |
 
+## Architecture
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/architecture-dark.svg">
+  <img alt="Files in the controller repository build the pinned image my-controller:1, which starts a Jenkins controller with zero executors inside docker compose; the controller schedules builds on the build agent, which checks out from the Git server and publishes to the artifact store with a token from the environment." src="docs/diagrams/architecture.svg">
+</picture>
+
+Everything in the left box defines the controller, so deleting its container and volume loses nothing; the amber notes are the rebuild proof and the masked token.
+
+## How one run flows
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/flow-dark.svg">
+  <img alt="One make run: compose starts the controller, the build agent fetches its secret, the repository is seeded to the Git server, Verify runs on the agent, an optional approval waits with no executor, and Publish uploads the jar with the bound token." src="docs/diagrams/flow.svg">
+</picture>
+
+The run ends with the jar in the artifact store; the amber row shows a broken unit test turning the build red with its report kept and nothing published.
+
 ## Prerequisites
 
 | Tool | Version | Used for |

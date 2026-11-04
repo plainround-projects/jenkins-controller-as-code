@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="830" viewBox="0 0 1200 830" role="img" aria-labelledby="t d">
+<title id="t">Architecture of the controller defined only by files</title>
+<desc id="d">Files in the controller repository build a pinned image, my-controller:1, which starts the Jenkins controller in docker compose. make seed pushes a snapshot of the repository to the Git server. The controller has zero executors and schedules builds on the build agent over a WebSocket. The agent checks out from the Git server and publishes the jar to the artifact store with a bearer token. The environment file supplies the admin password and the publish token. Two notes show the rebuild proof and the masked token.</desc>
+<style>
+:root{--paper:#0d1117;--ink:#f5f4f8;--mute:#9a96ab;--accent:#6ec8ff;--good:#7ce0a1;--warn:#ffd166}
+text{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;fill:var(--ink)}
+.title{font-family:Georgia,'Iowan Old Style','Times New Roman',serif;font-size:36px}
+.caption{font-size:16px;fill:var(--mute)}
+.name{font-size:20px;font-weight:600}
+.lane{font-size:17px;font-weight:600}
+.sub{font-size:15px;fill:var(--mute)}
+.label{font-size:15px}
+.tag{font-size:15px;fill:var(--mute)}
+.num{font-size:15px;font-weight:700;fill:var(--paper)}
+.legend{font-size:14px;fill:var(--mute)}
+.t-accent{fill:var(--accent)}
+.t-good{fill:var(--good)}
+.t-warn{fill:var(--warn)}
+.t-ink{fill:var(--ink)}
+.b{font-weight:600}
+.paper{fill:var(--paper);stroke:var(--mute);stroke-opacity:.3}
+.grid{fill:url(#grid)}
+.boundary{fill:var(--mute);fill-opacity:.035;stroke:var(--mute);stroke-opacity:.7;stroke-dasharray:6 5}
+.svc{fill:var(--accent);fill-opacity:.08;stroke:var(--accent);stroke-width:1.25}
+.store{fill:var(--mute);fill-opacity:.1;stroke:var(--mute);stroke-width:1.25}
+.rim{fill:none;stroke:var(--mute);stroke-width:1.25}
+.actor{fill:none;stroke:var(--mute);stroke-width:1.25}
+.slot{fill:var(--accent);fill-opacity:.14;stroke:var(--accent);stroke-width:1}
+.note{fill:var(--warn);fill-opacity:.09;stroke:var(--warn);stroke-width:1}
+.win{fill:var(--good);fill-opacity:.09;stroke:var(--good);stroke-width:1}
+.hair{fill:none;stroke:var(--mute);stroke-opacity:.4;stroke-width:1}
+.zone{fill:var(--accent);fill-opacity:.045;stroke:var(--accent);stroke-width:1.25;stroke-dasharray:6 5}
+.stop{fill:none;stroke:var(--warn);stroke-width:4;stroke-linecap:round}
+.mask{fill:var(--paper)}
+.sync,.async,.read,.fail,.ok{fill:none}
+.sync{stroke:var(--accent);stroke-width:1.75;marker-end:url(#a-sync)}
+.async{stroke:var(--accent);stroke-width:1.75;stroke-dasharray:8 6;marker-end:url(#a-async)}
+.read{stroke:var(--mute);stroke-width:1.75;stroke-linecap:round;stroke-dasharray:1 6;marker-end:url(#a-read)}
+.fail{stroke:var(--warn);stroke-width:2;marker-end:url(#a-fail)}
+.ok{stroke:var(--good);stroke-width:1.75;marker-end:url(#a-ok)}
+.dot{fill:var(--accent)}
+.dot-w{fill:var(--warn)}
+.dot-g{fill:var(--good)}
+.head-sync,.head-async{stroke:var(--accent)}
+.head-sync{fill:var(--accent)}
+.head-async,.head-read{fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.head-read{stroke:var(--mute)}
+.head-fail{fill:var(--warn)}
+.head-ok{fill:var(--good)}
+.gridline{fill:none;stroke:var(--mute);stroke-opacity:.09}
+</style>
+<defs>
+<pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path class="gridline" d="M40 0H0V40"/></pattern>
+<marker id="a-sync" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="head-sync" d="M0 0L10 5L0 10z"/></marker>
+<marker id="a-async" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="head-async" d="M1 1L9 5L1 9"/></marker>
+<marker id="a-read" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="head-read" d="M1 1L9 5L1 9"/></marker>
+<marker id="a-fail" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="head-fail" d="M0 0L10 5L0 10z"/></marker>
+<marker id="a-ok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="head-ok" d="M0 0L10 5L0 10z"/></marker>
+</defs>
+<rect class="paper" x="0.5" y="0.5" width="1199" height="829" rx="16"/>
+<rect class="grid" x="1" y="1" width="1198" height="828" rx="16"/>
+<text class="title" x="48" y="68">A controller that is only code</text>
+<text class="caption" x="48" y="100">Everything in the left box defines the controller; the amber notes are the two proofs the lesson drills.</text>
+<rect class="boundary" x="48" y="132" width="472" height="208" rx="14"/>
+<text class="tag" x="64" y="160">Controller repository: this repo</text>
+<path class="store" d="M72 180a100 12 0 0 1 200 0v128a100 12 0 0 1 -200 0z"/>
+<path class="rim" d="M72 180a100 12 0 0 0 200 0"/>
+<text class="name" x="172" y="212" text-anchor="middle">controller/</text>
+<text class="sub" x="172" y="234" text-anchor="middle">Dockerfile</text>
+<text class="sub" x="172" y="256" text-anchor="middle">plugins.lock.txt</text>
+<text class="sub" x="172" y="278" text-anchor="middle">casc/jenkins.yaml</text>
+<path class="store" d="M296 180a100 12 0 0 1 200 0v76a100 12 0 0 1 -200 0z"/>
+<path class="rim" d="M296 180a100 12 0 0 0 200 0"/>
+<text class="name" x="396" y="212" text-anchor="middle">Jenkinsfile</text>
+<text class="sub" x="396" y="234" text-anchor="middle">pipeline/scripts</text>
+<rect class="svc" x="72" y="404" width="208" height="124" rx="12"/>
+<text class="name" x="88" y="436">Pinned image</text>
+<text class="sub" x="88" y="460">my-controller:1</text>
+<text class="sub" x="88" y="482">Jenkins 2.580.1 LTS</text>
+<text class="sub" x="88" y="504">80 plugins pinned</text>
+<rect class="boundary" x="620" y="132" width="532" height="428" rx="14"/>
+<text class="tag" x="644" y="160">docker compose: one network</text>
+<rect class="svc" x="644" y="188" width="200" height="84" rx="12"/>
+<text class="name" x="660" y="220">Git server</text>
+<text class="sub" x="660" y="244">controller-as-code</text>
+<rect class="svc" x="928" y="188" width="200" height="108" rx="12"/>
+<text class="name" x="944" y="220">Artifact store</text>
+<text class="sub" x="944" y="244">publish-sink</text>
+<text class="sub" x="944" y="266">needs the token</text>
+<rect class="svc" x="644" y="404" width="200" height="124" rx="12"/>
+<text class="name" x="660" y="436">Controller</text>
+<text class="sub" x="660" y="460">0 executors</text>
+<text class="sub" x="660" y="482">JCasC applied</text>
+<text class="sub" x="660" y="504">runs no builds</text>
+<rect class="svc" x="928" y="404" width="200" height="124" rx="12"/>
+<text class="name" x="944" y="436">Build agent</text>
+<text class="sub" x="944" y="460">docker-agent</text>
+<text class="sub" x="944" y="482">2 executors</text>
+<text class="sub" x="944" y="504">JDK 21, git</text>
+<path class="store" d="M736 652a150 12 0 0 1 300 0v102a150 12 0 0 1 -300 0z"/>
+<path class="rim" d="M736 652a150 12 0 0 0 300 0"/>
+<text class="name" x="886" y="684" text-anchor="middle">Environment</text>
+<text class="sub" x="886" y="706" text-anchor="middle">ADMIN_PASSWORD, PUBLISH_TOKEN</text>
+<text class="sub" x="886" y="728" text-anchor="middle">.env, ignored by Git</text>
+<rect class="note" x="72" y="580" width="292" height="100" rx="10"/>
+<text class="label b t-warn" x="88" y="610">make rebuild-proof</text>
+<text class="sub" x="88" y="636">container and volume gone:</text>
+<text class="sub" x="88" y="658">same configuration back</text>
+<rect class="note" x="392" y="580" width="292" height="100" rx="10"/>
+<text class="label b t-warn" x="408" y="610">ECHO_TOKEN=true</text>
+<text class="sub" x="408" y="636">the step echoes the token,</text>
+<text class="sub" x="408" y="658">the log shows ****</text>
+<path class="sync" d="M172 320V404"/>
+<text class="label t-accent" x="184" y="372">docker build</text>
+<path class="sync" d="M280 440H644"/>
+<text class="label t-accent" x="292" y="430">start</text>
+<path class="sync" d="M520 230H644"/>
+<text class="label t-accent" x="528" y="220">make seed</text>
+<path class="sync" d="M744 404V272"/>
+<text class="label t-accent" x="756" y="344">Jenkinsfile</text>
+<path class="sync" d="M944 404V312Q944 300 932 300H812Q800 300 800 288V272"/>
+<text class="label t-accent" x="826" y="290">checkout</text>
+<path class="sync" d="M1008 404V296"/>
+<text class="label t-accent" x="1020" y="360">publish.sh</text>
+<path class="async" d="M844 440H928"/>
+<text class="label t-accent" x="852" y="430">schedule</text>
+<path class="read" d="M886 640V612Q886 600 874 600H756Q744 600 744 588V528"/>
+<text class="label" x="760" y="590">admin, token</text>
+<path class="read" d="M886 640V612Q886 600 898 600H1004Q1016 600 1016 588V528"/>
+<text class="label" x="906" y="590">admin only</text>
+<path class="sync" d="M48 786H112"/><text class="legend" x="124" y="791">sync call</text>
+<path class="async" d="M264 786H328"/><text class="legend" x="340" y="791">async message</text>
+<path class="read" d="M520 786H584"/><text class="legend" x="596" y="791">read</text>
+</svg>

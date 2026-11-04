@@ -4,6 +4,10 @@ All notable changes to this project are recorded here. The format follows [Keep 
 
 ## [Unreleased]
 
+### Added
+
+- Drawn architecture and flow figures in `docs/diagrams/`, light and dark, shown in the README.
+
 ### Fixed
 
 - The agent's Maven cache volume is writable by the build user (found by the first live run).
